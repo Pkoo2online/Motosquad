@@ -1,0 +1,44 @@
+name: Build MotoSquad Android APK
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: ☕ Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 🐦 Set up Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: 📦 Generate Android Platform Files
+        run: |
+          flutter create --org com.motosquad --project-name motosquad --platforms android .
+
+      - name: 📦 Install Flutter Dependencies
+        run: flutter pub get
+
+      - name: 🔨 Build Android Release APK
+        run: flutter build apk --release
+
+      - name: 🚀 Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MotoSquad-Release-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
