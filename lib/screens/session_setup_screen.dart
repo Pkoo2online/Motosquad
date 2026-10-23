@@ -16,7 +16,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
   final _nameCtrl = TextEditingController(text: 'Alex Rider');
   final _callsignCtrl = TextEditingController(text: 'Viper-1');
   final _convoyCtrl = TextEditingController(text: 'RIDERS101');
-  final _serverCtrl = TextEditingController(text: 'http://localhost:4040');
+  final _serverCtrl = TextEditingController(text: 'https://smart-panther-35.loca.lt');
   RiderRole _selectedRole = RiderRole.leader;
 
   @override
@@ -140,10 +140,13 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                 style: const TextStyle(color: Colors.white, fontSize: 13),
                 decoration: InputDecoration(
                   labelText: 'Convoy Server URL',
+                  hintText: 'e.g. https://... or Wi-Fi IP',
+                  helperText: 'Public tunnel or Wi-Fi IP to link friends together',
+                  helperStyle: const TextStyle(color: Colors.white38),
                   labelStyle: const TextStyle(color: Colors.white54),
                   filled: true,
                   fillColor: const Color(0xFF1B1E26),
-                  prefixIcon: const Icon(Icons.dns_outlined, color: Colors.white38),
+                  prefixIcon: const Icon(Icons.dns_outlined, color: Colors.cyanAccent),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               ),

@@ -26,6 +26,30 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: 📦 Generate Android Platform Project
+        run: |
+          rm -rf android
+          flutter create --org com.motosquad --project-name motosquad --platforms android .
+
+      - name: 🛡️ Inject Android Internet & Location Permissions
+        run: |
+          python3 -c "
+          p = 'android/app/src/main/AndroidManifest.xml'
+          content = open(p).read()
+          perms = '''
+              <uses-permission android:name=\"android.permission.INTERNET\"/>
+              <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>
+              <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>
+              <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>
+              <uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\"/>
+              <uses-permission android:name=\"android.permission.WAKE_LOCK\"/>
+          '''
+          content = content.replace('<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">', '<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">' + perms)
+          content = content.replace('<application', '<application android:usesCleartextTraffic=\"true\"')
+          open(p, 'w').write(content)
+          print('Injected Android permissions successfully.')
+          "
+
       - name: 📦 Install Flutter Dependencies
         run: flutter pub get
 
