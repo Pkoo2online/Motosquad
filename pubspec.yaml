@@ -1,0 +1,49 @@
+name: motosquad
+description: "Real-time Motorcycle & Cycling Convoy App with Map, PTT Walkie-Talkie, SOS, and Offline Mesh Resilience."
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # State Management
+  provider: ^6.1.2
+  
+  # Mapping and Geolocation
+  flutter_map: ^6.1.0
+  latlong2: ^0.9.0
+  geolocator: ^11.0.0
+  
+  # Real-time WebSocket & PTT Signaling
+  socket_io_client: ^2.0.3+1
+  flutter_webrtc: ^0.10.6
+  
+  # Audio, Alerts and Sound Effects
+  audioplayers: ^6.0.0
+  record: ^5.1.2
+  
+  # Offline Resilience and Storage
+  shared_preferences: ^2.2.3
+  uuid: ^4.4.0
+  
+  # Bluetooth Low Energy (for offline mesh radar when cell drops)
+  flutter_blue_plus: ^1.31.14
+  
+  # UI & Helpers
+  intl: ^0.19.0
+  font_awesome_flutter: ^10.7.0
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/sounds/

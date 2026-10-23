@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MotoSquad - Real-Time Convoy Simulator</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top HUD Navigation -->
+    <header class="hud-header">
+      <div class="hud-left">
+        <div class="logo">
+          <i class="fa-solid fa-motorcycle text-orange"></i>
+          <span>MOTOSQUAD</span>
+        </div>
+        <div class="convoy-badge">
+          <span class="status-dot"></span>
+          <span id="convoy-code-display">CONVOY #RIDERS101</span>
+        </div>
+      </div>
+      <div class="hud-right">
+        <div class="stat-pill">
+          <span class="label">LEAD SPEED</span>
+          <span class="val" id="lead-speed">65 km/h</span>
+        </div>
+        <div class="stat-pill">
+          <span class="label">RIDERS</span>
+          <span class="val text-cyan" id="rider-count">4 Active</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Convoy Separation Alert Banner -->
+    <div id="separation-alert" class="alert-banner warning hidden">
+      <i class="fa-solid fa-triangle-exclamation"></i>
+      <span id="separation-text">Rider Phantom is lagging 1.4km behind!</span>
+    </div>
+
+    <!-- SOS Beacon Banner -->
+    <div id="sos-banner" class="alert-banner emergency hidden">
+      <i class="fa-solid fa-circle-radiation"></i>
+      <div class="sos-content">
+        <strong id="sos-rider-name">SOS ALERT</strong>
+        <span id="sos-reason-text">Incident reported</span>
+      </div>
+      <button id="btn-resolve-sos" class="btn-small">Acknowledge</button>
+    </div>
+
+    <!-- Main Live Map -->
+    <div id="map"></div>
+
+    <!-- Floating Action Controls -->
+    <div class="floating-actions">
+      <button id="btn-trigger-sos" class="fab btn-sos" title="Broadcast SOS Beacon">
+        <i class="fa-solid fa-tower-broadcast"></i>
+        <span>SOS</span>
+      </button>
+      <button id="btn-add-wp" class="fab btn-secondary" title="Drop Waypoint">
+        <i class="fa-solid fa-location-dot"></i>
+      </button>
+      <button id="btn-recenter" class="fab btn-secondary" title="Recenter on Lead">
+        <i class="fa-solid fa-crosshairs"></i>
+      </button>
+    </div>
+
+    <!-- Bottom Glove-Friendly Intercom & Squad Drawer -->
+    <footer class="bottom-panel">
+      <!-- Active Speaker Info -->
+      <div id="speaker-indicator" class="speaker-status">
+        <i class="fa-solid fa-radio"></i>
+        <span id="speaker-text">Intercom Channel: Open</span>
+      </div>
+
+      <!-- Push To Talk Hold Button -->
+      <div class="ptt-container">
+        <button id="ptt-button" class="ptt-button">
+          <div class="ptt-inner">
+            <i class="fa-solid fa-microphone"></i>
+            <span class="ptt-text">HOLD TO TALK</span>
+          </div>
+          <div class="pulse-ring"></div>
+        </button>
+      </div>
+
+      <!-- Quick Squad Roster Drawer Handle -->
+      <div class="squad-drawer">
+        <div class="drawer-header" id="drawer-toggle">
+          <span><i class="fa-solid fa-users"></i> Convoy Squad Telemetry</span>
+          <i class="fa-solid fa-chevron-up" id="drawer-icon"></i>
+        </div>
+        <div class="drawer-content" id="roster-list">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

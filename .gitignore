@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+.npm/
+
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.pub-cache/
+.pub/
+
+# Environment and IDE
+.env
+.idea/
+.vscode/
+*.swp
+*.lock
+
+# OS Files
+.DS_Store
+Thumbs.db
