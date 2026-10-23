@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../models/rider.dart';
 import '../models/sos_alert.dart';
 import '../models/waypoint.dart';
+import '../models/convoy_message.dart';
 import '../services/location_service.dart';
 import '../services/socket_ptt_service.dart';
 import '../services/offline_storage_service.dart';
@@ -20,14 +21,17 @@ class ConvoyProvider with ChangeNotifier {
 
   Rider? _currentRider;
   String _convoyCode = '';
-  String _serverUrl = 'http://10.0.2.2:4040'; // Default Android emulator local, or host IP
+  String _serverUrl = '';
 
   final Map<String, Rider> _squadRiders = {};
   final List<Waypoint> _waypoints = [];
+  final List<ConvoyMessage> _messages = [];
   SosAlert? _activeSos;
   Rider? _activeSpeaker;
+  ConvoyMessage? _latestInstruction;
   bool _isConnected = false;
   bool _isTransmittingSelf = false;
+  bool _isGpsAcquired = false;
 
   // Convoy gap monitoring
   final double _separationThresholdMeters = 500.0;
@@ -38,6 +42,7 @@ class ConvoyProvider with ChangeNotifier {
   StreamSubscription? _ridersSub;
   StreamSubscription? _sosSub;
   StreamSubscription? _speakerSub;
+  StreamSubscription? _msgSub;
   StreamSubscription? _connSub;
 
   // Getters
@@ -45,10 +50,13 @@ class ConvoyProvider with ChangeNotifier {
   String get convoyCode => _convoyCode;
   List<Rider> get squadRiders => _squadRiders.values.toList();
   List<Waypoint> get waypoints => _waypoints;
+  List<ConvoyMessage> get messages => _messages;
   SosAlert? get activeSos => _activeSos;
   Rider? get activeSpeaker => _activeSpeaker;
+  ConvoyMessage? get latestInstruction => _latestInstruction;
   bool get isConnected => _isConnected;
   bool get isTransmittingSelf => _isTransmittingSelf;
+  bool get isGpsAcquired => _isGpsAcquired;
   String? get separationWarningMessage => _separationWarningMessage;
   double get separationThresholdMeters => _separationThresholdMeters;
 
@@ -59,18 +67,18 @@ class ConvoyProvider with ChangeNotifier {
     required String convoyCode,
     String? serverUrl,
   }) {
-    if (serverUrl != null && serverUrl.isNotEmpty) {
-      _serverUrl = serverUrl;
-    }
+    _serverUrl = serverUrl?.trim() ?? '';
+    _convoyCode = convoyCode.trim();
+    _isGpsAcquired = false;
 
-    _convoyCode = convoyCode;
+    // Start with 0, 0 until REAL device GPS lock is acquired
     _currentRider = Rider(
       id: const Uuid().v4(),
       name: name,
       callsign: callsign,
       role: role,
-      latitude: 28.6139, // Default fallback coordinate so map loads immediately
-      longitude: 77.2090,
+      latitude: 0.0,
+      longitude: 0.0,
     );
 
     _setupSubscriptions();
@@ -108,11 +116,20 @@ class ConvoyProvider with ChangeNotifier {
       notifyListeners();
     });
 
-    _socketPttService.connect(
-      serverUrl: _serverUrl,
-      convoyCode: _convoyCode,
-      currentRider: _currentRider!,
-    );
+    _msgSub = _socketPttService.messageStream.listen((msg) {
+      _messages.add(msg);
+      _latestInstruction = msg;
+      _audioAlertService.playSeparationAlert();
+      notifyListeners();
+    });
+
+    if (_serverUrl.isNotEmpty) {
+      _socketPttService.connect(
+        serverUrl: _serverUrl,
+        convoyCode: _convoyCode,
+        currentRider: _currentRider!,
+      );
+    }
   }
 
   Future<void> _initLocationTracking() async {
@@ -123,11 +140,13 @@ class ConvoyProvider with ChangeNotifier {
         if (pos != null && _currentRider != null) {
           _currentRider!.latitude = pos.latitude;
           _currentRider!.longitude = pos.longitude;
+          _currentRider!.speedKmh = (pos.speed * 3.6).clamp(0.0, 300.0);
+          _isGpsAcquired = true;
           notifyListeners();
         }
       }
     } catch (e) {
-      debugPrint('Location permission init: $e');
+      debugPrint('Location permission init error: $e');
     }
     _startLocationUpdates();
   }
@@ -142,8 +161,9 @@ class ConvoyProvider with ChangeNotifier {
         _currentRider!.speedKmh = (pos.speed * 3.6).clamp(0.0, 300.0);
         _currentRider!.heading = pos.heading;
         _currentRider!.lastSeen = DateTime.now();
+        _isGpsAcquired = true;
 
-        if (_isConnected) {
+        if (_isConnected && _serverUrl.isNotEmpty) {
           _socketPttService.sendLocationUpdate(
             convoyCode: _convoyCode,
             riderId: _currentRider!.id,
@@ -162,7 +182,7 @@ class ConvoyProvider with ChangeNotifier {
         notifyListeners();
       });
     } catch (e) {
-      debugPrint('Location stream error: $e');
+      debugPrint('Location stream tracking error: $e');
     }
   }
 
@@ -186,7 +206,7 @@ class ConvoyProvider with ChangeNotifier {
         );
 
         if (distToLeader > _separationThresholdMeters) {
-          warning = 'Warning: You are ${(distToLeader / 1000).toStringAsFixed(1)}km behind Lead Rider!';
+          warning = '⚠️ You are ${(distToLeader / 1000).toStringAsFixed(1)}km behind Lead Rider!';
         }
       }
     }
@@ -200,7 +220,7 @@ class ConvoyProvider with ChangeNotifier {
           LatLng(rider.latitude, rider.longitude),
         );
         if (dist > _separationThresholdMeters) {
-          warning = '${rider.name} (${rider.callsign}) is lagging behind by ${(dist / 1000).toStringAsFixed(1)}km!';
+          warning = '⚠️ ${rider.name} (${rider.callsign}) is lagging ${(dist / 1000).toStringAsFixed(1)}km behind!';
           break;
         }
       }
@@ -228,6 +248,28 @@ class ConvoyProvider with ChangeNotifier {
         );
       }
     }
+  }
+
+  // Messaging & Quick Instructions
+  void sendMessage(String text, {bool isQuick = false}) {
+    if (_currentRider == null || text.trim().isEmpty) return;
+    final msg = ConvoyMessage(
+      id: const Uuid().v4(),
+      senderId: _currentRider!.id,
+      senderName: _currentRider!.name,
+      callsign: _currentRider!.callsign,
+      text: text.trim(),
+      isQuickInstruction: isQuick,
+    );
+    _messages.add(msg);
+    _latestInstruction = msg;
+    _socketPttService.sendMessage(convoyCode: _convoyCode, message: msg);
+    notifyListeners();
+  }
+
+  void dismissLatestInstruction() {
+    _latestInstruction = null;
+    notifyListeners();
   }
 
   // PTT Actions
@@ -305,6 +347,7 @@ class ConvoyProvider with ChangeNotifier {
     _ridersSub?.cancel();
     _sosSub?.cancel();
     _speakerSub?.cancel();
+    _msgSub?.cancel();
     _connSub?.cancel();
     super.dispose();
   }

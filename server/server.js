@@ -116,6 +116,12 @@ io.on('connection', (socket) => {
     io.to(convoyCode).emit('waypoint-broadcast', waypoint);
   });
 
+  // Convoy Message or Quick Instruction
+  socket.on('send-convoy-message', ({ convoyCode, message }) => {
+    console.log(`💬 [Message] [${convoyCode}] ${message.senderName}: ${message.text}`);
+    io.to(convoyCode).emit('convoy-message-broadcast', message);
+  });
+
   // Disconnect
   socket.on('disconnect', () => {
     if (currentConvoyCode && currentRiderId) {

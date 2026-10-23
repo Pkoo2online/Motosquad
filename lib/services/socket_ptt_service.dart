@@ -3,6 +3,7 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../models/rider.dart';
 import '../models/sos_alert.dart';
 import '../models/waypoint.dart';
+import '../models/convoy_message.dart';
 
 class SocketPttService {
   IO.Socket? _socket;
@@ -16,6 +17,7 @@ class SocketPttService {
   final _pttActiveRiderController = StreamController<Rider?>.broadcast();
   final _audioChunkController = StreamController<List<int>>.broadcast();
   final _waypointController = StreamController<Waypoint>.broadcast();
+  final _messageController = StreamController<ConvoyMessage>.broadcast();
   final _connectionStatusController = StreamController<bool>.broadcast();
 
   Stream<List<Rider>> get ridersStream => _ridersStreamController.stream;
@@ -23,77 +25,102 @@ class SocketPttService {
   Stream<Rider?> get pttActiveRiderStream => _pttActiveRiderController.stream;
   Stream<List<int>> get audioChunkStream => _audioChunkController.stream;
   Stream<Waypoint> get waypointStream => _waypointController.stream;
+  Stream<ConvoyMessage> get messageStream => _messageController.stream;
   Stream<bool> get connectionStatusStream => _connectionStatusController.stream;
 
   void connect({required String serverUrl, required String convoyCode, required Rider currentRider}) {
     if (_socket != null && _socket!.connected) return;
 
-    _socket = IO.io(
-      serverUrl,
-      IO.OptionBuilder()
-          .setTransports(['websocket'])
-          .enableAutoConnect()
-          .enableReconnection()
-          .setReconnectionDelay(1000)
-          .setReconnectionDelayMax(5000)
-          .build(),
-    );
-
-    _socket!.onConnect((_) {
-      _isConnected = true;
-      _connectionStatusController.add(true);
-      
-      // Join convoy room
-      _socket!.emit('join-convoy', {
-        'convoyCode': convoyCode,
-        'rider': currentRider.toJson(),
-      });
-    });
-
-    _socket!.onDisconnect((_) {
+    if (serverUrl.isEmpty) {
       _isConnected = false;
       _connectionStatusController.add(false);
-    });
+      return;
+    }
 
-    // Listen for full convoy riders list or incremental updates
-    _socket!.on('convoy-riders-update', (data) {
-      if (data is List) {
-        final riders = data.map((json) => Rider.fromJson(json as Map<String, dynamic>)).toList();
-        _ridersStreamController.add(riders);
-      }
-    });
+    try {
+      _socket = IO.io(
+        serverUrl,
+        IO.OptionBuilder()
+            .setTransports(['websocket', 'polling'])
+            .enableAutoConnect()
+            .enableReconnection()
+            .setReconnectionDelay(1500)
+            .setReconnectionDelayMax(6000)
+            .build(),
+      );
 
-    // Listen for PTT talk transmission status
-    _socket!.on('ptt-status', (data) {
-      if (data != null && data['transmittingRider'] != null) {
-        _pttActiveRiderController.add(Rider.fromJson(data['transmittingRider']));
-      } else {
-        _pttActiveRiderController.add(null);
-      }
-    });
+      _socket!.onConnect((_) {
+        _isConnected = true;
+        _connectionStatusController.add(true);
+        
+        // Join convoy room
+        _socket!.emit('join-convoy', {
+          'convoyCode': convoyCode,
+          'rider': currentRider.toJson(),
+        });
+      });
 
-    // Listen for raw audio packets
-    _socket!.on('ptt-audio', (data) {
-      if (data != null && data['chunk'] != null) {
-        // Audio stream data received
-      }
-    });
+      _socket!.onConnectError((_) {
+        _isConnected = false;
+        _connectionStatusController.add(false);
+      });
 
-    // Emergency SOS received from a rider
-    _socket!.on('sos-broadcast', (data) {
-      if (data != null) {
-        final alert = SosAlert.fromJson(data as Map<String, dynamic>);
-        _sosStreamController.add(alert);
-      }
-    });
+      _socket!.onDisconnect((_) {
+        _isConnected = false;
+        _connectionStatusController.add(false);
+      });
 
-    // New waypoint placed by Leader or Scout
-    _socket!.on('waypoint-broadcast', (data) {
-      if (data != null) {
-        final wp = Waypoint.fromJson(data as Map<String, dynamic>);
-        _waypointController.add(wp);
-      }
-    });
+      // Listen for full convoy riders list or incremental updates
+      _socket!.on('convoy-riders-update', (data) {
+        if (data is List) {
+          final riders = data.map((json) => Rider.fromJson(json as Map<String, dynamic>)).toList();
+          _ridersStreamController.add(riders);
+        }
+      });
+
+      // Listen for PTT talk transmission status
+      _socket!.on('ptt-status', (data) {
+        if (data != null && data['transmittingRider'] != null) {
+          _pttActiveRiderController.add(Rider.fromJson(data['transmittingRider']));
+        } else {
+          _pttActiveRiderController.add(null);
+        }
+      });
+
+      // Listen for raw audio packets
+      _socket!.on('ptt-audio', (data) {
+        if (data != null && data['chunk'] != null) {
+          // Audio stream data received
+        }
+      });
+
+      // Emergency SOS received from a rider
+      _socket!.on('sos-broadcast', (data) {
+        if (data != null) {
+          final alert = SosAlert.fromJson(data as Map<String, dynamic>);
+          _sosStreamController.add(alert);
+        }
+      });
+
+      // New waypoint placed by Leader or Scout
+      _socket!.on('waypoint-broadcast', (data) {
+        if (data != null) {
+          final wp = Waypoint.fromJson(data as Map<String, dynamic>);
+          _waypointController.add(wp);
+        }
+      });
+
+      // Convoy chat or quick instruction broadcast
+      _socket!.on('convoy-message-broadcast', (data) {
+        if (data != null) {
+          final msg = ConvoyMessage.fromJson(data as Map<String, dynamic>);
+          _messageController.add(msg);
+        }
+      });
+    } catch (_) {
+      _isConnected = false;
+      _connectionStatusController.add(false);
+    }
   }
 
   void sendLocationUpdate({
@@ -150,9 +177,19 @@ class SocketPttService {
     });
   }
 
+  void sendMessage({required String convoyCode, required ConvoyMessage message}) {
+    if (_socket == null || !_isConnected) return;
+    _socket!.emit('send-convoy-message', {
+      'convoyCode': convoyCode,
+      'message': message.toJson(),
+    });
+  }
+
   void disconnect() {
-    _socket?.disconnect();
-    _socket?.dispose();
+    try {
+      _socket?.disconnect();
+      _socket?.dispose();
+    } catch (_) {}
     _socket = null;
     _isConnected = false;
   }
@@ -164,6 +201,7 @@ class SocketPttService {
     _pttActiveRiderController.close();
     _audioChunkController.close();
     _waypointController.close();
+    _messageController.close();
     _connectionStatusController.close();
   }
 }

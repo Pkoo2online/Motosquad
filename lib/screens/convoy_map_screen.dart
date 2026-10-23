@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../models/rider.dart';
 import '../models/waypoint.dart';
+import '../models/convoy_message.dart';
 import '../providers/convoy_provider.dart';
 import '../widgets/ptt_button.dart';
 import '../widgets/rider_radar_card.dart';
@@ -21,15 +22,32 @@ class ConvoyMapScreen extends StatefulWidget {
 class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
   final MapController _mapController = MapController();
   bool _followSelf = true;
+  bool _hasInitialCentered = false;
 
   @override
   Widget build(BuildContext context) {
     final convoy = Provider.of<ConvoyProvider>(context);
     final currentRider = convoy.currentRider;
 
-    final LatLng center = (currentRider != null && currentRider.latitude != 0)
+    // Check if we have real device GPS fix
+    final bool hasValidGps = currentRider != null && currentRider.latitude != 0.0;
+
+    // Automatically fly to user's real GPS (Mumbai/local) on first lock
+    if (hasValidGps && !_hasInitialCentered) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _mapController.move(LatLng(currentRider.latitude, currentRider.longitude), 16.0);
+          setState(() {
+            _hasInitialCentered = true;
+          });
+        }
+      });
+    }
+
+    // Centering point
+    final LatLng center = hasValidGps
         ? LatLng(currentRider.latitude, currentRider.longitude)
-        : const LatLng(28.6139, 77.2090); // Default fallback coordinate
+        : const LatLng(19.0760, 72.8777); // Mumbai default if waiting for GPS satellite
 
     return Scaffold(
       backgroundColor: const Color(0xFF121418),
@@ -53,14 +71,45 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
                 userAgentPackageName: 'com.motosquad',
                 maxZoom: 19,
               ),
-              // Markers for Squad Riders
               MarkerLayer(
                 markers: _buildMarkers(convoy),
               ),
             ],
           ),
 
-          // 2. Top HUD Bar (Status, Convoy Code, Connection indicator)
+          // 2. GPS Lock Waiting Banner if satellite fix is pending
+          if (!hasValidGps)
+            Positioned(
+              top: 90,
+              left: 20,
+              right: 20,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.85),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.orangeAccent),
+                ),
+                child: Row(
+                  children: const [
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orangeAccent),
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Acquiring GPS satellite lock in your location...',
+                        style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // 3. Top HUD Bar & Alerts
           SafeArea(
             child: Column(
               children: [
@@ -70,13 +119,33 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
                     message: convoy.separationWarningMessage!,
                     onTap: () => _openRidersSheet(context),
                   ),
+                if (convoy.latestInstruction != null)
+                  _buildInstructionBanner(context, convoy),
                 if (convoy.activeSos != null)
                   _buildSosAlertBanner(context, convoy),
               ],
             ),
           ),
 
-          // 3. Floating Glove-Friendly Action Buttons (Center Recenter, Add Waypoint, SOS)
+          // 4. Quick Tactical Rider Instructions (Glove 1-Tap Callouts)
+          Positioned(
+            left: 16,
+            bottom: 180,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildQuickInstructionPill('⛽ Fuel Stop', () => convoy.sendMessage('⛽ Need Fuel / Petrol Pump', isQuick: true)),
+                const SizedBox(height: 6),
+                _buildQuickInstructionPill('☕ Tea Break', () => convoy.sendMessage('☕ Time for Pitstop / Tea', isQuick: true)),
+                const SizedBox(height: 6),
+                _buildQuickInstructionPill('⚠️ Hazard', () => convoy.sendMessage('⚠️ Road Hazard / Potholes', isQuick: true)),
+                const SizedBox(height: 6),
+                _buildQuickInstructionPill('🛑 Regroup', () => convoy.sendMessage('🛑 Regroup / Pull Over', isQuick: true)),
+              ],
+            ),
+          ),
+
+          // 5. Floating Glove-Friendly Action Buttons (SOS, Waypoint, Recenter, Chat)
           Positioned(
             right: 16,
             bottom: 180,
@@ -89,7 +158,26 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
                   onPressed: () => _showSosDialog(context, convoy),
                   child: const Icon(Icons.emergency_rounded, color: Colors.white, size: 30),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                // Chat / Messages Dialog
+                FloatingActionButton.small(
+                  heroTag: 'chat_btn',
+                  backgroundColor: const Color(0xFF1E222B),
+                  onPressed: () => _openChatSheet(context, convoy),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      const Icon(Icons.chat_bubble_outline, color: Colors.cyanAccent),
+                      if (convoy.messages.isNotEmpty)
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: CircleAvatar(radius: 4, backgroundColor: Colors.orangeAccent),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
                 // Add Waypoint (Leader/Scout)
                 FloatingActionButton.small(
                   heroTag: 'wp_btn',
@@ -97,8 +185,8 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
                   onPressed: () => _showAddWaypointDialog(context, convoy),
                   child: const Icon(Icons.add_location_alt_outlined, color: Colors.amber),
                 ),
-                const SizedBox(height: 12),
-                // Recenter GPS
+                const SizedBox(height: 10),
+                // Recenter GPS Button
                 FloatingActionButton.small(
                   heroTag: 'gps_btn',
                   backgroundColor: const Color(0xFF1E222B),
@@ -117,7 +205,7 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
             ),
           ),
 
-          // 4. Bottom Controls: PTT Intercom & Squad Drawer Handle
+          // 6. Bottom Controls: PTT Intercom & Squad Drawer Handle
           Positioned(
             left: 0,
             right: 0,
@@ -181,6 +269,25 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
     );
   }
 
+  Widget _buildQuickInstructionPill(String text, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1B1E26).withOpacity(0.92),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white12),
+          boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 6)],
+        ),
+        child: Text(
+          text,
+          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
   Widget _buildTopHud(BuildContext context, ConvoyProvider convoy) {
     final rider = convoy.currentRider;
     return Container(
@@ -201,7 +308,7 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
                 height: 10,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: convoy.isConnected ? Colors.greenAccent : Colors.redAccent,
+                  color: convoy.isConnected ? Colors.greenAccent : Colors.orangeAccent,
                 ),
               ),
               const SizedBox(width: 8),
@@ -213,8 +320,13 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                   Text(
-                    '${rider?.role.displayName} • ${rider?.callsign}',
-                    style: const TextStyle(color: Colors.white60, fontSize: 11),
+                    convoy.isConnected
+                        ? '${rider?.role.displayName} • ${rider?.callsign}'
+                        : 'GPS Active (Offline Convoy)',
+                    style: TextStyle(
+                      color: convoy.isConnected ? Colors.white60 : Colors.orangeAccent,
+                      fontSize: 11,
+                    ),
                   ),
                 ],
               ),
@@ -242,6 +354,35 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
                 ],
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInstructionBanner(BuildContext context, ConvoyProvider convoy) {
+    final msg = convoy.latestInstruction!;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.cyan.shade900.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.cyanAccent),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.chat_bubble_outline, color: Colors.cyanAccent, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '${msg.callsign}: ${msg.text}',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, color: Colors.white60, size: 16),
+            onPressed: () => convoy.dismissLatestInstruction(),
           ),
         ],
       ),
@@ -291,7 +432,7 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
   List<Marker> _buildMarkers(ConvoyProvider convoy) {
     final List<Marker> markers = [];
 
-    // Current rider marker
+    // Current rider marker (Your Bike)
     if (convoy.currentRider != null && convoy.currentRider!.latitude != 0) {
       markers.add(
         Marker(
@@ -340,7 +481,7 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
   }
 
   Widget _buildRiderIcon(Rider rider, {required bool isSelf}) {
-    Color markerColor = Colors.cyanAccent;
+    Color markerColor = isSelf ? Colors.greenAccent : Colors.cyanAccent;
     IconData iconData = Icons.two_wheeler;
 
     if (rider.isSosActive) {
@@ -380,7 +521,7 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
             borderRadius: BorderRadius.circular(4),
           ),
           child: Text(
-            rider.callsign,
+            isSelf ? 'YOU (${rider.callsign})' : rider.callsign,
             style: TextStyle(
               color: isSelf ? Colors.greenAccent : Colors.white,
               fontSize: 9,
@@ -422,7 +563,7 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
 
   void _showAddWaypointDialog(BuildContext context, ConvoyProvider convoy) {
     final textCtrl = TextEditingController();
-    WaypointType selectedType = WaypointType.regroup;
+    WaypointType selectedType = WaypointType.fuel;
 
     showDialog(
       context: context,
@@ -437,7 +578,7 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
                 controller: textCtrl,
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
-                  labelText: 'Waypoint Name (e.g. Shell Petrol Pump)',
+                  labelText: 'Waypoint Name (e.g. Petrol Station / Lunch)',
                   labelStyle: TextStyle(color: Colors.white70),
                 ),
               ),
@@ -480,6 +621,101 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
     );
   }
 
+  void _openChatSheet(BuildContext context, ConvoyProvider convoy) {
+    final textCtrl = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF181B22),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+            top: 16,
+            left: 16,
+            right: 16,
+          ),
+          child: SizedBox(
+            height: 380,
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: const [
+                    Text('CONVOY CHAT & INSTRUCTIONS', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                    Icon(Icons.directions_bike, color: Colors.cyanAccent),
+                  ],
+                ),
+                const Divider(color: Colors.white12),
+                Expanded(
+                  child: convoy.messages.isEmpty
+                      ? const Center(child: Text('No messages yet. Send an instruction below.', style: TextStyle(color: Colors.white38, fontSize: 12)))
+                      : ListView.builder(
+                          itemCount: convoy.messages.length,
+                          itemBuilder: (context, i) {
+                            final m = convoy.messages[i];
+                            final isMe = m.senderId == convoy.currentRider?.id;
+                            return Container(
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: isMe ? Colors.orange.withOpacity(0.2) : const Color(0xFF242832),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: isMe ? Colors.orangeAccent : Colors.white10),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('${m.senderName} (${m.callsign})', style: const TextStyle(color: Colors.cyanAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                                  const SizedBox(height: 2),
+                                  Text(m.text, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: textCtrl,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            hintText: 'Type instruction for squad...',
+                            hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+                            filled: true,
+                            fillColor: const Color(0xFF252A36),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.send, color: Colors.orangeAccent),
+                        onPressed: () {
+                          if (textCtrl.text.isNotEmpty) {
+                            convoy.sendMessage(textCtrl.text);
+                            textCtrl.clear();
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   void _openRidersSheet(BuildContext context) {
     final convoy = Provider.of<ConvoyProvider>(context, listen: false);
     final selfPos = convoy.currentRider != null && convoy.currentRider!.latitude != 0
@@ -509,7 +745,7 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
                       style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                     ),
                     Text(
-                      'Threshold: ${convoy.separationThresholdMeters.toInt()}m',
+                      'Gap Alert: ${convoy.separationThresholdMeters.toInt()}m',
                       style: const TextStyle(color: Colors.white38, fontSize: 12),
                     ),
                   ],
