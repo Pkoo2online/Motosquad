@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: motosquad-server
+    env: node
+    plan: free
+    buildCommand: cd server && npm install
+    startCommand: cd server && node server.js
+    envVars:
+      - key: PORT
+        value: 4040
