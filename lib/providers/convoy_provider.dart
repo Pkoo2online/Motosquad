@@ -30,7 +30,7 @@ class ConvoyProvider with ChangeNotifier {
   bool _isTransmittingSelf = false;
 
   // Convoy gap monitoring
-  double _separationThresholdMeters = 500.0;
+  final double _separationThresholdMeters = 500.0;
   String? _separationWarningMessage;
 
   // Stream subscriptions
@@ -69,12 +69,12 @@ class ConvoyProvider with ChangeNotifier {
       name: name,
       callsign: callsign,
       role: role,
-      latitude: 0.0,
-      longitude: 0.0,
+      latitude: 28.6139, // Default fallback coordinate so map loads immediately
+      longitude: 77.2090,
     );
 
     _setupSubscriptions();
-    _startLocationUpdates();
+    _initLocationTracking();
     notifyListeners();
   }
 
@@ -115,34 +115,55 @@ class ConvoyProvider with ChangeNotifier {
     );
   }
 
-  void _startLocationUpdates() {
-    _locationService.startTracking(onPositionChanged: (Position pos) {
-      if (_currentRider == null) return;
-
-      _currentRider!.latitude = pos.latitude;
-      _currentRider!.longitude = pos.longitude;
-      _currentRider!.speedKmh = (pos.speed * 3.6).clamp(0.0, 300.0);
-      _currentRider!.heading = pos.heading;
-      _currentRider!.lastSeen = DateTime.now();
-
-      if (_isConnected) {
-        _socketPttService.sendLocationUpdate(
-          convoyCode: _convoyCode,
-          riderId: _currentRider!.id,
-          latitude: pos.latitude,
-          longitude: pos.longitude,
-          speed: _currentRider!.speedKmh,
-          heading: pos.heading,
-          battery: _currentRider!.batteryLevel,
-        );
-      } else {
-        // Buffer locally for offline resilience
-        _storageService.queueUnsentLocation(_currentRider!.toJson());
+  Future<void> _initLocationTracking() async {
+    try {
+      final hasPerm = await _locationService.checkAndRequestPermissions();
+      if (hasPerm) {
+        final pos = await _locationService.getCurrentPosition();
+        if (pos != null && _currentRider != null) {
+          _currentRider!.latitude = pos.latitude;
+          _currentRider!.longitude = pos.longitude;
+          notifyListeners();
+        }
       }
+    } catch (e) {
+      debugPrint('Location permission init: $e');
+    }
+    _startLocationUpdates();
+  }
 
-      _checkConvoySeparation();
-      notifyListeners();
-    });
+  void _startLocationUpdates() {
+    try {
+      _locationService.startTracking(onPositionChanged: (Position pos) {
+        if (_currentRider == null) return;
+
+        _currentRider!.latitude = pos.latitude;
+        _currentRider!.longitude = pos.longitude;
+        _currentRider!.speedKmh = (pos.speed * 3.6).clamp(0.0, 300.0);
+        _currentRider!.heading = pos.heading;
+        _currentRider!.lastSeen = DateTime.now();
+
+        if (_isConnected) {
+          _socketPttService.sendLocationUpdate(
+            convoyCode: _convoyCode,
+            riderId: _currentRider!.id,
+            latitude: pos.latitude,
+            longitude: pos.longitude,
+            speed: _currentRider!.speedKmh,
+            heading: pos.heading,
+            battery: _currentRider!.batteryLevel,
+          );
+        } else {
+          // Buffer locally for offline resilience
+          _storageService.queueUnsentLocation(_currentRider!.toJson());
+        }
+
+        _checkConvoySeparation();
+        notifyListeners();
+      });
+    } catch (e) {
+      debugPrint('Location stream error: $e');
+    }
   }
 
   void _checkConvoySeparation() {

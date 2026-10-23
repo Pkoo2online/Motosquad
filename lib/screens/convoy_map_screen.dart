@@ -50,7 +50,8 @@ class _ConvoyMapScreenState extends State<ConvoyMapScreen> {
             children: [
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.motosquad.app',
+                userAgentPackageName: 'com.motosquad',
+                maxZoom: 19,
               ),
               // Markers for Squad Riders
               MarkerLayer(

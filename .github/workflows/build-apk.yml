@@ -26,10 +26,6 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: 📦 Generate Android Platform Project
-        run: |
-          flutter create --org com.motosquad --project-name motosquad --platforms android .
-
       - name: 📦 Install Flutter Dependencies
         run: flutter pub get
 
